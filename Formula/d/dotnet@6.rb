@@ -3,8 +3,8 @@ class DotnetAT6 < Formula
   homepage "https://dotnet.microsoft.com/"
   # Source-build tag announced at https://github.com/dotnet/source-build/discussions
   url "https://github.com/dotnet/installer.git",
-      tag:      "v6.0.125",
-      revision: "e898a826c2b7f66602c8962134ef165fb9e6d44b"
+      tag:      "v6.0.132",
+      revision: "b1806f3a38b61b34fb53e175efce615f223718e9"
   license "MIT"
 
   bottle do
@@ -26,6 +26,12 @@ class DotnetAT6 < Formula
   uses_from_macos "llvm" => :build
   uses_from_macos "krb5"
   uses_from_macos "zlib"
+
+  on_ventura do
+    # Use LLVM to work around libc++abi: terminating due to uncaught exception of type PAL_SEHException
+    # Use version 16 to avoid https://github.com/dotnet/runtime/issues/104105
+    depends_on "llvm@16"
+  end
 
   on_linux do
     depends_on "libunwind"
@@ -59,7 +65,18 @@ class DotnetAT6 < Formula
   patch :DATA
 
   def install
-    ENV.append_path "LD_LIBRARY_PATH", Formula["icu4c"].opt_lib if OS.linux?
+    if OS.linux?
+      ENV.append_path "LD_LIBRARY_PATH", Formula["icu4c"].opt_lib
+    elsif MacOS.version == :ventura && DevelopmentTools.clang_build_version >= 1500
+      llvm = Formula["llvm@16"]
+      ENV["CC"] = llvm.opt_bin/"clang"
+      ENV["CXX"] = llvm.opt_bin/"clang++"
+      ENV["VERBOSE"] = "1"
+      ENV.prepend_path "HOMEBREW_LIBRARY_PATHS", Formula["llvm"].opt_lib
+      ENV.prepend_path "HOMEBREW_LIBRARY_PATHS", Formula["llvm"].opt_lib/"c++"
+      ENV["EXTRA_LDFLAGS"] = "-Wl,-ld_classic -L#{llvm.opt_lib}/c++ -L#{llvm.opt_lib}"
+      ENV.prepend "LDFLAGS", "-Wl,-ld_classic -L#{llvm.opt_lib}/c++ -L#{llvm.opt_lib}"
+    end
 
     (buildpath/".dotnet").install resource("dotnet-install.sh")
     (buildpath/"src/SourceBuild/tarball/patches/msbuild").install resource("homebrew-msbuild-patch")
@@ -98,7 +115,7 @@ class DotnetAT6 < Formula
       # Rename patch fails on case-insensitive systems like macOS
       # TODO: Remove whenever patch is no longer used
       rename_patch = "0001-Rename-NuGet.Config-to-NuGet.config-to-account-for-a.patch"
-      (Pathname("src/nuget-client/eng/source-build-patches")/rename_patch).unlink if OS.mac?
+      rm("src/nuget-client/eng/source-build-patches/#{rename_patch}") if OS.mac?
 
       prep_args = (OS.linux? && Hardware::CPU.intel?) ? [] : ["--bootstrap"]
       system "./prep.sh", *prep_args
